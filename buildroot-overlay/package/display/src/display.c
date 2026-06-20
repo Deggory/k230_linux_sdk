@@ -21,7 +21,14 @@ static void page_flip_handler(int fd, unsigned int sequence, unsigned int tv_sec
     // do nothing
 }
 
+static int display_disable_output(struct display* display);
+
 void display_exit(struct display* display) {
+    if (display == NULL)
+        return;
+
+    display_disable_output(display);
+
     struct display_plane* p = display->planes;
     while (p != NULL) {
         display_free_plane(p);
@@ -608,6 +615,58 @@ static int drm_add_conn_property(const struct display* display, drmModeAtomicReq
     }
 
     return 0;
+}
+
+static int display_disable_output(struct display* display) {
+    if (display == NULL || display->fd < 0 || display->conn_id == 0 || display->crtc_id == 0)
+        return 0;
+
+    if (display->req != NULL)
+        display_wait_vsync(display);
+
+    drmModeAtomicReqPtr req = drmModeAtomicAlloc();
+    if (!req) {
+        pr("drmModeAtomicAlloc failed");
+        return -ENOMEM;
+    }
+
+    int ret = 0;
+    struct display_plane* plane = display->planes;
+    while (plane != NULL) {
+        ret = drm_add_plane_property(plane, req, "FB_ID", 0);
+        if (ret < 0)
+            goto out;
+
+        ret = drm_add_plane_property(plane, req, "CRTC_ID", 0);
+        if (ret < 0)
+            goto out;
+
+        plane = plane->next;
+    }
+
+    ret = drm_add_conn_property(display, req, "CRTC_ID", 0);
+    if (ret < 0)
+        goto out;
+
+    ret = drm_add_crtc_property(display, req, "ACTIVE", 0);
+    if (ret < 0)
+        goto out;
+
+    ret = drm_add_crtc_property(display, req, "MODE_ID", 0);
+    if (ret < 0)
+        goto out;
+
+    ret = drmModeAtomicCommit(display->fd, req, DRM_MODE_ATOMIC_ALLOW_MODESET, NULL);
+    if (ret < 0) {
+        pr("disable output failed: %d(%s)", ret, strerror(errno));
+        goto out;
+    }
+
+    display->commitFlags = 0;
+
+out:
+    drmModeAtomicFree(req);
+    return ret;
 }
 
 int display_update_buffer(struct display_buffer* buffer, uint32_t x, uint32_t y) {

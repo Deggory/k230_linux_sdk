@@ -210,9 +210,6 @@ bool show_display(py::array img_array, int x = 0, int y = 0) {
 void deinit_display() {
     if (!g_display) return;
 
-    display_free_buffer(g_buffers[0]);
-    display_free_buffer(g_buffers[1]);
-    display_free_plane(g_plane);
     display_exit(g_display);
     g_buffers[0] = nullptr;
     g_buffers[1] = nullptr;
