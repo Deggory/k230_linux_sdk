@@ -16,6 +16,7 @@
 #include <sys/select.h>
 #include <unistd.h>
 #include <v4l2-drm.h>
+#include "vvcam_sensor_target.h"
 
 void v4l2_drm_default_context(struct v4l2_drm_context* ctx) {
     memset(ctx, 0 , sizeof(*ctx));
@@ -41,6 +42,10 @@ void v4l2_drm_default_context(struct v4l2_drm_context* ctx) {
     ctx->drm_rotation = rotation_0;
     ctx->hflip = -1;
     ctx->vflip = -1;
+    ctx->sensor_width = 0;
+    ctx->sensor_height = 0;
+    ctx->sensor_fps = 0;
+    ctx->sensor_target_valid = false;
 }
 
 static int v4l2_drm_set_control(int fd, uint32_t id, int value)
@@ -118,19 +123,14 @@ int v4l2_drm_setup(struct v4l2_drm_context context[], unsigned num, struct displ
         struct v4l2_capability capbility;
         CKE(ioctl(context[i].video_fd, VIDIOC_QUERYCAP, &capbility), close);
 
-        struct v4l2_fmtdesc fmtdesc;
-        memset(&fmtdesc, 0, sizeof(fmtdesc));
-        fmtdesc.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-        while (ioctl(context[i].video_fd, VIDIOC_ENUM_FMT, &fmtdesc) == 0) {
-            pr(
-                "/dev/video%u support format %c%c%c%c",
-                context[i].device,
-                (fmtdesc.pixelformat >> 0) & 0xff,
-                (fmtdesc.pixelformat >> 8) & 0xff,
-                (fmtdesc.pixelformat >> 16) & 0xff,
-                (fmtdesc.pixelformat >> 24) & 0xff
-            );
-            fmtdesc.index += 1;
+        if (context[i].sensor_target_valid) {
+            if (vvcam_set_sensor_target(context[i].video_fd,
+                    context[i].sensor_width,
+                    context[i].sensor_height,
+                    context[i].sensor_fps) < 0) {
+                perror("VIDIOC_S_EXT_CTRLS sensor target");
+                CKE(-1, close);
+            }
         }
 
         // struct v4l2_crop crop;
@@ -141,21 +141,36 @@ int v4l2_drm_setup(struct v4l2_drm_context context[], unsigned num, struct displ
         // }
         // printf("--------------------cropcap.widt is %d ------------dadadadad ---------------------- \n", cropcap.bounds.width);
 
+        /*
+         * Create pipeline first, apply flip (Bayer may change), then S_FMT so
+         * ISP demosaic matches. Always write HFLIP/VFLIP (default 0) so a prior
+         * run's sticky V4L2 control cannot reappear at STREAMON.
+         */
+        {
+            struct v4l2_format probe_fmt;
+            memset(&probe_fmt, 0, sizeof(probe_fmt));
+            probe_fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+            CKE(ioctl(context[i].video_fd, VIDIOC_G_FMT, &probe_fmt), close);
+        }
+
+        {
+            int hflip = (context[i].hflip >= 0) ? context[i].hflip : 0;
+            int vflip = (context[i].vflip >= 0) ? context[i].vflip : 0;
+
+            CKE(v4l2_drm_set_control(context[i].video_fd, V4L2_CID_HFLIP, hflip), close);
+            CKE(v4l2_drm_set_control(context[i].video_fd, V4L2_CID_VFLIP, vflip), close);
+            context[i].hflip = hflip;
+            context[i].vflip = vflip;
+        }
+
         struct v4l2_format format;
-        format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-        CKE(ioctl(context[i].video_fd, VIDIOC_G_FMT, &format), close);
+        memset(&format, 0, sizeof(format));
         format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         format.fmt.pix.pixelformat = context[i].video_format;
         format.fmt.pix.width = context[i].width;
         format.fmt.pix.height = context[i].height;
+        format.fmt.pix.field = V4L2_FIELD_NONE;
         CKE(ioctl(context[i].video_fd, VIDIOC_S_FMT, &format), close);
-
-        if (context[i].hflip >= 0) {
-            CKE(v4l2_drm_set_control(context[i].video_fd, V4L2_CID_HFLIP, context[i].hflip), close);
-        }
-        if (context[i].vflip >= 0) {
-            CKE(v4l2_drm_set_control(context[i].video_fd, V4L2_CID_VFLIP, context[i].vflip), close);
-        }
 
         if((context[i].crop_size.height != 0) && (context[i].crop_size.width != 0) &&
                 (context[i].crop_size.height > context[i].height ) && (context[i].crop_size.width > context[i].width))
@@ -345,6 +360,7 @@ int v4l2_drm_run(struct v4l2_drm_context context[], unsigned num, v4l2_drm_handl
             flag_enable_display = 1;
             d = context[i].plane->display;
             display_fd = d->fd;
+            d->frame_count = 0;
         }
         continue;
         streamerr:
@@ -353,10 +369,8 @@ int v4l2_drm_run(struct v4l2_drm_context context[], unsigned num, v4l2_drm_handl
         }
         return -1;
     }
-    uint32_t display_frame_count = 0;
+
     struct pollfd fds[num + flag_enable_display];
-    struct timeval tv, tv2;
-    gettimeofday(&tv, NULL);
     while (1) {
         for (unsigned i = 0; i < num; i++) {
             fds[i].fd = context[i].video_fd;
@@ -475,7 +489,7 @@ int v4l2_drm_run(struct v4l2_drm_context context[], unsigned num, v4l2_drm_handl
                 context[i].flag_dqbuf = false;
             }
             CKE(display_commit(d), streamoff);
-            display_frame_count += 1;
+            d->frame_count += 1;
         }
     }
     streamoff:
@@ -486,7 +500,18 @@ int v4l2_drm_run(struct v4l2_drm_context context[], unsigned num, v4l2_drm_handl
 }
 
 bool v4l2_drm_run_v4l2_2_drm_need_run = 1;
-struct display_buffer *g_p_osd_disp_buffer = NULL;
+
+static int v4l2_drm_run_v4l2_2_drm_have_data_to_display(const struct display* d, const struct v4l2_drm_context context[], unsigned num)
+{
+    if(d->lvgl_disp_buffer || d->osd_disp_buffer)
+        return 1;
+
+    for (unsigned i = 0; i < num; i++) {
+        if ((context[i].buffer_hold[context[i].wp] >= 0) && (context[i].display))
+            return 1;
+    }
+    return 0;//no data
+}
 int v4l2_drm_run_v4l2_2_drm(struct v4l2_drm_context context[], unsigned num, v4l2_drm_handler handler) {
     int flag_enable_display = 0;
     int display_fd;
@@ -501,6 +526,7 @@ int v4l2_drm_run_v4l2_2_drm(struct v4l2_drm_context context[], unsigned num, v4l
                 flag_enable_display = 1;
                 d = context[i].plane->display;
                 display_fd = d->fd;
+                d->frame_count = 0;
             }
 
         }
@@ -511,10 +537,8 @@ int v4l2_drm_run_v4l2_2_drm(struct v4l2_drm_context context[], unsigned num, v4l
         }
         return -1;
     }
-    uint32_t display_frame_count = 0;
+
     struct pollfd fds[num + flag_enable_display];
-    struct timeval tv, tv2;
-    gettimeofday(&tv, NULL);
     while (v4l2_drm_run_v4l2_2_drm_need_run) {
         for (unsigned i = 0; i < num; i++) {
             fds[i].fd = context[i].video_fd;
@@ -612,17 +636,9 @@ int v4l2_drm_run_v4l2_2_drm(struct v4l2_drm_context context[], unsigned num, v4l
         }
 
         if (flag_enable_display && fds[num].revents) {
-            // display
-            bool flag_check_source = false;
-            for (unsigned i = 0; i < num; i++) {
-                if ((context[i].buffer_hold[context[i].wp] >= 0) && (context[i].display)) {
-                    flag_check_source = true;
-                    break;
-                }
-            }
-            if (!flag_check_source) {
-                // skip
-                continue;
+            if(!v4l2_drm_run_v4l2_2_drm_have_data_to_display(d,context,num)){
+                usleep(10000);// delay 10ms
+                continue; //no data to dispaly
             }
             display_handle_vsync(d);
             for (unsigned i = 0; i < num; i++) {
@@ -635,13 +651,17 @@ int v4l2_drm_run_v4l2_2_drm(struct v4l2_drm_context context[], unsigned num, v4l
                 ), streamoff);
                 context[i].flag_dqbuf = false;
             }
-            if(g_p_osd_disp_buffer){
-                display_update_buffer(g_p_osd_disp_buffer,0,0 );
-                g_p_osd_disp_buffer = NULL;
+            if(d->osd_disp_buffer){
+                display_update_buffer(d->osd_disp_buffer,0,0 );
+                d->osd_disp_buffer = NULL;
+            }
+            if(d->lvgl_disp_buffer){
+                display_update_buffer(d->lvgl_disp_buffer,0,0 );
+                d->lvgl_disp_buffer = NULL;
             }
 
             CKE(display_commit(d), streamoff);
-            display_frame_count += 1;
+            d->frame_count += 1;
         }
     }
     streamoff:
@@ -699,6 +719,10 @@ int v4l2_drm_stop(const struct v4l2_drm_context *context)
     if (!ctx || ctx->video_fd < 0) {
         return -1;
     }
+
+    /* Clear sticky V4L2 flip controls before teardown. */
+    (void)v4l2_drm_set_control(ctx->video_fd, V4L2_CID_HFLIP, 0);
+    (void)v4l2_drm_set_control(ctx->video_fd, V4L2_CID_VFLIP, 0);
 
     if (!ctx->display && ctx->buffers) {
         v4l2_drm_release_mmap_buffers(ctx);

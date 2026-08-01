@@ -336,6 +336,7 @@ before_script:
   - uptime
   - pwd
   - uname -a
+  - sudo pip3 install pcpp
   - cat /etc/issue
   - echo $CI_PROJECT_DIR
   - echo $CI_PROJECT_NAME
@@ -954,7 +955,7 @@ download_dir_release:
 
 release_image_publish:
   stage: release
-  timeout: 20m
+  timeout: 30m
   rules:
    - if: $CI_PIPELINE_SOURCE == "schedule"
    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_TAG =~ /^v\d+\.\d+.*$/
@@ -965,6 +966,8 @@ release_image_publish:
         - k230d_canmv_defconfig
         - BPI-CanMV-K230D-Zero_defconfig
         - k230_canmv_01studio_defconfig
+        - k230d_canmv_junroc_ai_cam_defconfig
+        - k230_canmv_mrt_defconfig
         - k230_canmv_lckfb_defconfig
         - k230_canmv_v3_defconfig
         - k230_canmv_01studio_emmc_defconfig
@@ -1121,6 +1124,8 @@ build-image_all:
         - k230d_canmv_defconfig
         - BPI-CanMV-K230D-Zero_defconfig
         - k230_canmv_01studio_defconfig
+        - k230d_canmv_junroc_ai_cam_defconfig
+        - k230_canmv_mrt_defconfig
         - k230_canmv_lckfb_defconfig
         - k230_canmv_v3_defconfig
         - k230_canmv_01studio_emmc_defconfig

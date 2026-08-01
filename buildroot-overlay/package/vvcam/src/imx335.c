@@ -131,6 +131,7 @@ struct imx335_mode {
 
 struct imx335_ctx {
     int i2c;
+    int i2c_bus;
     struct vvcam_sensor_mode mode;      // fora 3a current val
     uint32_t sensor_again;
     uint32_t et_line;
@@ -536,26 +537,68 @@ static int write_reg(struct imx335_ctx* ctx, uint16_t addr, uint8_t value) {
 }
 
 static int open_i2c(struct imx335_ctx* sensor) {
+    char i2c_dev[32];
 
-    // i2c
     if (sensor->i2c < 0) {
-        sensor->i2c = open("/dev/i2c-0", O_RDWR);
+        snprintf(i2c_dev, sizeof(i2c_dev), "/dev/i2c-%d", sensor->i2c_bus);
+        sensor->i2c = open(i2c_dev, O_RDWR);
         if (sensor->i2c < 0) {
-            perror("open /dev/i2c-0");
+            perror("open i2c device");
             return -1;
         }
-        //printf("I2C_SLAVE_ADDRESS_IMX335=%x\n", I2C_SLAVE_ADDRESS_IMX335);
         if (ioctl(sensor->i2c, I2C_SLAVE_FORCE, I2C_SLAVE_ADDRESS_IMX335) < 0) {
-            perror("i2c ctrl 0x36");
+            perror("imx335 i2c slave");
             return -1;
         }
     }
     return 0;
 }
 
-static int init(void** ctx) {
+static void imx335_close_i2c(struct imx335_ctx *sensor)
+{
+    if (sensor && sensor->i2c >= 0) {
+        close(sensor->i2c);
+        sensor->i2c = -1;
+    }
+}
+
+/*
+ * Align RTOS imx335 probe: only require I2C access to succeed.
+ * Chip-id value is not trusted — some modules return unexpected data
+ * (RTOS comments the same). Reg 0x3912 matches RTOS IMX335_REG_CHIP_ID.
+ */
+static int probe(uint8_t i2c_bus, uint32_t *chip_id)
+{
+    struct imx335_ctx sensor;
+    uint8_t id = 0;
+
+    memset(&sensor, 0, sizeof(sensor));
+    sensor.i2c = -1;
+    sensor.i2c_bus = i2c_bus;
+
+    if (open_i2c(&sensor))
+        return -1;
+
+    if (read_reg(&sensor, IMX335_REG_ID, &id) != 0) {
+        fprintf(stderr, "imx335: i2c probe failed on i2c-%u\n", i2c_bus);
+        imx335_close_i2c(&sensor);
+        return -1;
+    }
+    imx335_close_i2c(&sensor);
+
+    if (chip_id)
+        *chip_id = id;
+
+    fprintf(stderr, "imx335: probe ok, i2c-%u addr 0x%02x (reg 0x%04x=0x%02x)\n",
+        i2c_bus, I2C_SLAVE_ADDRESS_IMX335, IMX335_REG_ID, id);
+    return 0;
+}
+
+static int init(void** ctx, uint8_t i2c_bus) {
     struct imx335_ctx* sensor = calloc(1, sizeof(struct imx335_ctx));
+
     sensor->i2c = -1;
+    sensor->i2c_bus = i2c_bus;
     sensor->hflip = false;
     sensor->vflip = false;
     *ctx = sensor;
@@ -565,7 +608,8 @@ static int init(void** ctx) {
 
 static void deinit(void* ctx) {
     struct imx335_ctx* sensor = ctx;
-    close(sensor->i2c);
+
+    imx335_close_i2c(sensor);
     free(ctx);
 }
 
@@ -679,8 +723,6 @@ static int imx335_apply_orient(struct imx335_ctx *sensor)
 
 static int set_mode(void* ctx, uint32_t index) {
     struct imx335_ctx* sensor = ctx;
-    const bool want_hflip = sensor->hflip;
-    const bool want_vflip = sensor->vflip;
     //printf("f=%s l=%d index =%d\n", __func__, __LINE__,index);
 
     if (index >= ARRAY_SIZE(modes)) {
@@ -742,8 +784,8 @@ static int set_mode(void* ctx, uint32_t index) {
     // save current mode
     memcpy(&sensor->mode , mode, sizeof(struct vvcam_sensor_mode));
 
-    sensor->hflip = want_hflip;
-    sensor->vflip = want_vflip;
+    sensor->hflip = false;
+    sensor->vflip = false;
     CHECK_ERROR(imx335_apply_orient(sensor));
 
     return 0;
@@ -819,7 +861,11 @@ static int set_stream(void* ctx, bool on) {
     if (on) {
         ret = write_reg(ctx, IMX335_REG_MODE_SELECT, IMX335_MODE_STREAMING);
     } else {
-        ret = write_reg(ctx, IMX335_REG_MODE_SELECT, IMX335_MODE_STREAMING);
+        sensor->hflip = false;
+        sensor->vflip = false;
+        imx335_apply_orient(sensor);
+
+        ret = write_reg(ctx, IMX335_REG_MODE_SELECT, IMX335_MODE_STANDBY);
     }
     return ret;
 }
@@ -904,6 +950,7 @@ struct vvcam_sensor vvcam_imx335 = {
         .get_vflip = get_vflip,
         .set_analog_gain = set_analog_gain,
         .set_digital_gain = set_digital_gain,
-        .set_int_time = set_int_time
+        .set_int_time = set_int_time,
+        .probe = probe,
     }
 };
