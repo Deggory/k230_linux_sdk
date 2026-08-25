@@ -111,6 +111,13 @@ struct vvcam_isp_sensor_info {
 	char sensor[32];
 	uint8_t mode;
 	uint8_t i2c_bus;
+	uint8_t csi_idx;
+	uint8_t mclk_id;
+	uint8_t use_chip_clk;
+	uint8_t target_valid;
+	uint16_t target_width;
+	uint16_t target_height;
+	uint32_t target_fps;
 };
 
 #define MAX_SENSORS 3
@@ -119,6 +126,9 @@ struct sensor_config {
     char name[256];
     uint32_t mode;
     uint32_t i2c_bus;
+    uint32_t csi_idx;
+    uint32_t mclk_id;
+    uint32_t use_chip_clk;
 };
 
 

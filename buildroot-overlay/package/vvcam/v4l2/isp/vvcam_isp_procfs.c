@@ -92,7 +92,17 @@ static int vvcam_isp_procfs_info_show(struct seq_file *sfile, void *offset)
             seq_printf(sfile, "isp%d port%d:\n", isp_dev->id, port);
             seq_printf(sfile, "sensor   : %s\n", isp_dev->sensor_info[port].sensor);
             seq_printf(sfile, "i2c_bus   : %d\n", isp_dev->sensor_info[port].i2c_bus);
+            seq_printf(sfile, "csi_idx   : %d\n", isp_dev->sensor_info[port].csi_idx);
+            seq_printf(sfile, "mclk_id   : %d\n", isp_dev->sensor_info[port].mclk_id);
+            seq_printf(sfile, "use_chip_clk : %d\n", isp_dev->sensor_info[port].use_chip_clk);
             seq_printf(sfile, "mode     : %d\n", isp_dev->sensor_info[port].mode);
+            if (isp_dev->sensor_info[port].target_valid)
+                seq_printf(sfile, "target   : %ux%u@%u\n",
+                    isp_dev->sensor_info[port].target_width,
+                    isp_dev->sensor_info[port].target_height,
+                    isp_dev->sensor_info[port].target_fps);
+            else
+                seq_printf(sfile, "target   : (none)\n");
             seq_printf(sfile, "*********************************\n");
         }
     }
@@ -109,6 +119,37 @@ static int vvcam_isp_procfs_open(struct inode *inode, struct file *file)
 #else
 	return single_open(file, vvcam_isp_procfs_info_show, pde_data(inode));
 #endif
+}
+
+static void vvcam_isp_proc_clear_target(struct vvcam_isp_sensor_info *info)
+{
+    info->target_valid = 0;
+    info->target_width = 0;
+    info->target_height = 0;
+    info->target_fps = 0;
+}
+
+static int vvcam_isp_proc_parse_target(const char *val,
+        uint16_t *width, uint16_t *height, uint32_t *fps)
+{
+    unsigned int w = 0, h = 0, f = 0;
+
+    if (!val || !val[0])
+        return -1;
+
+    if (!strcmp(val, "0") || !strcmp(val, "off") || !strcmp(val, "clear"))
+        return 1;
+
+    if (sscanf(val, "%ux%u@%u", &w, &h, &f) != 3)
+        return -1;
+
+    if (!w || !h || !f)
+        return -1;
+
+    *width = (uint16_t)w;
+    *height = (uint16_t)h;
+    *fps = f;
+    return 0;
 }
 
 static int32_t vvcam_isp_proc_process(struct seq_file *sfile,
@@ -159,14 +200,58 @@ static int32_t vvcam_isp_proc_process(struct seq_file *sfile,
             else if (strcmp(val, "mode") == 0) {
                 val = strsep(&kv_cur, kv_delim);
                 if (val && isdigit(*val)) {
-                    isp_dev->sensor_info[port].mode = (uint32_t)simple_strtoul(val, &end, 0);
+                    isp_dev->sensor_info[port].mode =
+                        (uint8_t)simple_strtoul(val, &end, 0);
+                    vvcam_isp_proc_clear_target(
+                        &isp_dev->sensor_info[port]);
                 }
-            } 
+            }
+            else if (strcmp(val, "target") == 0) {
+                val = strsep(&kv_cur, kv_delim);
+                if (val) {
+                    struct vvcam_isp_sensor_info *info =
+                        &isp_dev->sensor_info[port];
+                    uint16_t tw = 0, th = 0;
+                    uint32_t tf = 0;
+                    int ret;
+
+                    ret = vvcam_isp_proc_parse_target(val, &tw, &th, &tf);
+                    if (ret == 1) {
+                        vvcam_isp_proc_clear_target(info);
+                    } else if (ret == 0) {
+                        info->target_valid = 1;
+                        info->target_width = tw;
+                        info->target_height = th;
+                        info->target_fps = tf;
+                    }
+                }
+            }
             else if (strcmp(val, "i2c_bus") == 0) {
                 val = strsep(&kv_cur, kv_delim);
                 if (val && isdigit(*val)) {
                     isp_dev->sensor_info[port].i2c_bus =
                         (uint8_t)simple_strtoul(val, &end, 0);
+                }
+            }
+            else if (strcmp(val, "csi_idx") == 0) {
+                val = strsep(&kv_cur, kv_delim);
+                if (val && isdigit(*val)) {
+                    isp_dev->sensor_info[port].csi_idx =
+                        (uint8_t)simple_strtoul(val, &end, 0);
+                }
+            }
+            else if (strcmp(val, "mclk_id") == 0) {
+                val = strsep(&kv_cur, kv_delim);
+                if (val && isdigit(*val)) {
+                    isp_dev->sensor_info[port].mclk_id =
+                        (uint8_t)simple_strtoul(val, &end, 0);
+                }
+            }
+            else if (strcmp(val, "use_chip_clk") == 0) {
+                val = strsep(&kv_cur, kv_delim);
+                if (val && isdigit(*val)) {
+                    isp_dev->sensor_info[port].use_chip_clk =
+                        simple_strtoul(val, &end, 0) ? 1 : 0;
                 }
             }
         }
