@@ -534,6 +534,7 @@ before_script:
     - *update_version
     - SUB_DIR="${SUB_BASE}/${CONF}";
     - echo "---create current image version dir---"
+    - sudo rm -rf ${DST_DIR}/${SUB_DIR}/ || exit 1
     - sudo mkdir -p ${DST_DIR}/${SUB_DIR}/ || exit 1
     - echo "---save sdk build output---"
     - ls "${SRC_DIR}"
@@ -950,6 +951,7 @@ download_dir_release:
     - if: $CI_PIPELINE_SOURCE == "schedule"
     # release
     - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_TAG =~ /^v\d+\.\d+.*$/
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "dev"
   extends:
     - .release_download_dir
 
@@ -972,6 +974,7 @@ release_image_publish:
         - k230_canmv_v3_defconfig
         - k230_canmv_01studio_emmc_defconfig
         - k230_canmv_dongshanpi_defconfig
+        - k230_evb_defconfig
   script:
     - echo "daily build image publish for ${CONF}"
     - |
@@ -1102,7 +1105,7 @@ build-image:
     # MR open
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
 
-  timeout: 60m
+  timeout: 70m
   script:
     - *show_vars
     - *check_build_result
@@ -1130,6 +1133,7 @@ build-image_all:
         - k230_canmv_v3_defconfig
         - k230_canmv_01studio_emmc_defconfig
         - k230_canmv_dongshanpi_defconfig
+        - k230_evb_defconfig
   variables:
     DST_BASE: /data1/k230/gitlab-ci/images/${CI_PROJECT_NAME}
     SRC_DIR: ./output/${CONF}/images
@@ -1144,7 +1148,7 @@ build-image_all:
     - if: $CI_PIPELINE_SOURCE == "web" && $CI_COMMIT_TAG !~ /^v\d+\.\d+.*$/
     # daily build
     - if: $CI_PIPELINE_SOURCE == "schedule"
-  timeout: 70m
+  timeout: 80m
   script:
     - *show_vars
     - *check_build_result

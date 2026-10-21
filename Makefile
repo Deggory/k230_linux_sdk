@@ -32,7 +32,7 @@ buildroot: $(BRW_BUILD_DIR)/.config
 	make -C $(BRW_BUILD_DIR) all   BR2_PRIMARY_SITE=$(BR2_PRIMARY_SITE)
 	@echo -e "\033[32m========================================\033[0m"
 	@echo -e "\033[32m Build complete!\033[0m"
-	@echo -e "\033[32m Image: $(BRW_BUILD_DIR)/images/sysimage-sdcard.img.gz\033[0m"
+	@tools/print_images.sh $(BRW_BUILD_DIR)
 	@echo -e "\033[32m========================================\033[0m"
 
 .PHONY:dl
@@ -71,22 +71,7 @@ help:sync
 
 .PHONY:list_def list-def
 list-def list_def:
-	@echo "current config:"
-	@echo "	$$(cat .last_conf | cut -d = -f2)"
-	@echo "Available all configs and board note:"
-	@echo "	k230_canmv_defconfig                  --canmv 1.0/1.1 board"
-	@echo "	k230_canmv_v3_defconfig               --canmv v3 board"
-	@echo "	k230_canmv_01studio_defconfig         --01studio board"
-	@echo "	k230_canmv_dongshanpi_defconfig       --dongshanpi board"
-	@echo "	k230_canmv_lckfb_defconfig            --lushanpi ,jialichuang board"
-	@echo "	BPI-CanMV-K230D-Zero_defconfig        --bananapi k230d"
-	@echo "	k230d_canmv_ilp32_defconfig           --k230d canmv new32 board,plct use"
-	@echo "	k230d_canmv_defconfig                 --k230d canmv zero board"
-	@echo "	BPI-CanMV-K230D-Zero_ilp32_defconfig  --plct use,new 32 board"
-	@echo "	k230_evb_defconfig                    --k230 evb board"
-	@echo "	k230_canmv_gt6700_defconfig           --gt6700 board"
-	@echo "	k230_canmv_01studio_emmc_defconfig    --01studio emmc board"
-	@echo ""
+	@tools/list_def.sh $(BRW_BUILD_DIR)
 
 
 
@@ -96,7 +81,7 @@ sync:
 	make -f tools/sync.mk sync   BR_SRC_DIR=$(BR_SRC_DIR)  BR_OVERLAY_DIR=$(BR_OVERLAY_DIR)  BR_NAME=$(BR_NAME)
 
 this-makefile := $(lastword $(MAKEFILE_LIST))  all dl help  savedefconfig  sync  %_defconfig  \
-				 debian ubuntu openouler  debian_rootfs ubuntu_rootfs list_def list-def  toolchain_and_depend buildroot  ddr_test_img_%
+				 debian ubuntu openouler  debian_rootfs ubuntu_rootfs list_def list-def  toolchain_and_depend buildroot  ddr_test_img_%  clean
 $(filter-out $(this-makefile) , $(MAKECMDGOALS)):	$(BRW_BUILD_DIR)/.config
 	[ -d $(BRW_BUILD_DIR) ] && make -C $(BRW_BUILD_DIR) $@ BR2_PRIMARY_SITE=$(BR2_PRIMARY_SITE)
 	@( if [ $@ = linux-savedefconfig ];then \
@@ -123,3 +108,14 @@ else
 endif
 
 #echo LINUX_OVERRIDE_SRCDIR=/home/wangjianxin/t/linux-xuantie-kernel >output/k230d_canmv_64kernel_32rootfs_defconfig/local.mk
+
+.PHONY:clean
+clean:
+	@echo -e "This will delete the entire \033[31m$(PWD)/output/\033[0m directory."; \
+	read -p "Continue? [y/N] " confirm; \
+	if [ "$$confirm" != "y" ] && [ "$$confirm" != "Y" ]; then \
+		echo "Aborted."; \
+		exit 1; \
+	fi
+	@rm -rf output
+	@make $(CONF)

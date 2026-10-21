@@ -49,7 +49,7 @@ gen_version()
 
 	cd  "${TARGET_DIR}" ;
 	mkdir -p etc/version/
-	sdk_ver="${last_tag}-$(date "+%Y%m%d-%H%M%S")-$(whoami)-$(hostname)-${commitid}-nncase${nncase_ver}"
+	sdk_ver="${last_tag}-$(date "+%Y%m%d-%H%M%S")-$(whoami | tr '-' '_')-$(hostname | tr '-' '_')-${commitid}-nncase${nncase_ver}"
 	echo -e "#############SDK VERSION######################################" >${rootfs_dir}/${ver_file}
 	echo -e "sdk:${sdk_ver}" >> ${rootfs_dir}/${ver_file}
 	echo -e "CONF:${CONF%_defconfig}" >> ${ver_file}
@@ -63,7 +63,7 @@ gen_version()
 }
 auto_boot_proc()
 {
-	set -x
+	#set -x
 	#BR2_ROOTFS_OVERLAY=$(cat ${BASE_DIR}/.config | grep BR2_ROOTFS_OVERLAY | cut -d= -f2  |  tr -d '"' )
 	local config="${BASE_DIR}/.config"
 	local CONF=$(basename ${BASE_DIR})

@@ -77,6 +77,15 @@ enum env_location arch_env_get_location(enum env_operation op, int prio)
     }
 	return ENVL_MMC;
 }
+void enter_to_usb_burn_mode(void)
+{
+    printf("now enter to usb burn mode\r\n\n");
+    mdelay(100);
+
+    writel(0x5aa5a55a, (void*)0x80230000);
+    flush_dcache_range(0x80230000,0x80230000+4);
+    writel(0x10001, (void*)SYSCTL_BOOT_BASE_ADDR+0x60);
+}
 #ifndef CONFIG_SPL_BUILD
 int board_early_init_f(void)
 {
@@ -519,20 +528,28 @@ static int do_k230_set_dtb(struct cmd_tbl *cmdtp, int flag, int argc, char *cons
     //printf("%s\n",cmd);
     if( (0 == run_command(cmd, 0))  &&
         (0 < env_get_ulong("filesize", 16, 0)) ){
-        return k230_set_dtb_env("dtb","force_dtb");
+        ret = k230_set_dtb_env("dtb","force_dtb");
+        if (ret)
+            ret = k230_set_dtb_env("dtb","force_dtb");
+        return ret;
     }
 
 	ret = uclass_get_device_by_seq(UCLASS_I2C, CONFIG_K230_HDMI_LCD_I2C_BUS, &bus);
 	if (ret ==0 ) {
         if(0 == dm_i2c_probe(bus, CONFIG_K230_LCD_I2C_DEV, 0, &chip)){ //探测到lcd
-            return k230_set_dtb_env("dtb", "lcd_dtb");
+            if (!k230_set_dtb_env("dtb", "lcd_dtb"))
+                return 0;
         }
         if(0 == dm_i2c_probe(bus, CONFIG_K230_HDMI_I2C_DEV, 0, &chip)){ //探测到hdmi；
-            return k230_set_dtb_env("dtb", "hdmi_dtb");
+            if (!k230_set_dtb_env("dtb", "hdmi_dtb"))
+                return 0;
         }
 	}
     //探测失败默认lcd;
-    return k230_set_dtb_env("dtb", "lcd_dtb");//默认lcd；;
+    ret = k230_set_dtb_env("dtb", "lcd_dtb"); //默认lcd
+    if (ret)
+        ret = k230_set_dtb_env("dtb", "lcd_dtb");
+    return ret;
 }
 U_BOOT_CMD(
 	k230_set_dtb, CONFIG_SYS_MAXARGS, 0, do_k230_set_dtb,
@@ -542,12 +559,7 @@ U_BOOT_CMD(
 
 static int do_2_burn_mode(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[])
 {
-    //int ret = 0;
-    // k230_detect_display();
-    // return 0;
-    writel(0x5aa5a55a, (void*)0x80230000);
-    flush_dcache_range(0x80230000,0x80230000+4);
-    writel(0x10001, (void*)SYSCTL_BOOT_BASE_ADDR+0x60);
+    enter_to_usb_burn_mode();
     return 0;
 }
 U_BOOT_CMD(
